@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import './App.css'; // Make sure to create this CSS file
 
@@ -30,6 +30,22 @@ function App() {
   const [skipLogin, setSkipLogin] = useState(false);
   const [automationSpeed, setAutomationSpeed] = useState(1);
   const serverPort = 3000;
+  const [logs, setLogs] = useState([]);
+  const wsRef = useRef(null);
+
+  useEffect(() => {
+    wsRef.current = new WebSocket('ws://localhost:3002');
+    wsRef.current.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      setLogs(prevLogs => [...prevLogs, data]);
+    };
+
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
+    };
+  }, []);
 
   const handleManualLogin = async () => {
     try {
@@ -46,6 +62,7 @@ function App() {
     e.preventDefault();
     setError('');
     setResult('');
+    setLogs([]);
     try {
       let parsedActions = JSON.parse(actions);
       console.log('Sending automation request with actions:', parsedActions);
@@ -204,6 +221,17 @@ function App() {
             <div id="screenshot" className="screenshot-container"></div>
           </div>
         )}
+        <div className="logs-section">
+          <h2>Automation Logs:</h2>
+          <div className="logs-container">
+            {logs.map((log, index) => (
+              <div key={index} className={`log-entry ${log.status}`}>
+                {log.status === 'success' ? '✅' : '❌'} {log.action.type}: {log.action.target}
+                {log.action.value && ` (Value: ${log.action.value})`}
+              </div>
+            ))}
+          </div>
+        </div>
       </main>
     </div>
   );
