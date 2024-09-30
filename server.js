@@ -191,32 +191,36 @@ app.post('/automate', async (req, res) => {
                 case 'click':
                   highlightElement(element, 'red');
                   element.click();
+                  console.log(`Clicked element: ${action.target}`);
                   break;
                 case 'input':
+                  console.log(`Setting input value to: ${action.value}`);
                   highlightElement(element, 'blue');
-                  // Try multiple methods to set the input value
-                  element.value = action.value;
-                  element.setAttribute('value', action.value);
-                  // Use executeScript to set the value
-                  const setValueScript = (el, value) => {
-                    el.value = value;
-                    el.dispatchEvent(new Event('input', { bubbles: true }));
-                    el.dispatchEvent(new Event('change', { bubbles: true }));
-                  };
-                  setValueScript(element, action.value);
+                  if (element.isContentEditable) {
+                    element.textContent = action.value;
+                    element.dispatchEvent(new Event('input', { bubbles: true }));
+                  } else if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') {
+                    element.value = action.value;
+                    element.dispatchEvent(new Event('input', { bubbles: true }));
+                    element.dispatchEvent(new Event('change', { bubbles: true }));
+                  } else {
+                    element.textContent = action.value;
+                  }
                   // Simulate typing
                   action.value.split('').forEach(char => {
                     element.dispatchEvent(new KeyboardEvent('keydown', { key: char }));
                     element.dispatchEvent(new KeyboardEvent('keypress', { key: char }));
                     element.dispatchEvent(new KeyboardEvent('keyup', { key: char }));
                   });
+                  console.log(`Input value set for element: ${action.target}`);
                   break;
                 default:
                   reject(`Unknown action type: ${action.type}`);
                   return;
               }
-              resolve();
+              resolve({ status: "success" });
             } else {
+              console.log(`Element not found: ${action.target}`);
               reject(`Element not found: ${action.target}`);
             }
           }, baseWaitTime);
