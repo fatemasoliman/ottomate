@@ -1,0 +1,19 @@
+{
+  "name": "web-interaction-automation",
+  "version": "1.0.0",
+  "main": "server.js",
+  "dependencies": {
+    "axios": "^1.7.7",
+    "body-parser": "^1.19.0",
+    "cors": "^2.8.5",
+    "dotenv": "^10.0.0",
+    "express": "^4.17.1",
+    "googleapis": "^92.0.0",
+    "jsdom": "^25.0.1",
+    "puppeteer": "^23.4.1",
+    "selenium-webdriver": "^4.25.0"
+  },
+  "scripts": {
+    "start": "node server.js"
+  }
+}
