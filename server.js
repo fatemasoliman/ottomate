@@ -157,7 +157,7 @@ app.post('/automate', async (req, res) => {
     console.log('Page title:', await page.title());
     console.log('Page URL:', page.url());
 
-    // Inject the automation script
+    // Inject the updated automation script
     await page.evaluate((actionsString, speed) => {
       const actions = JSON.parse(actionsString);
       const baseWaitTime = 1000 / speed;
@@ -181,17 +181,110 @@ app.post('/automate', async (req, res) => {
         }, 2000);
       }
 
+      function simulateMouseEvents(element, events) {
+        events.forEach(eventType => {
+          const rect = element.getBoundingClientRect();
+          const event = new MouseEvent(eventType, {
+            view: window,
+            bubbles: true,
+            cancelable: true,
+            clientX: rect.left + rect.width / 2,
+            clientY: rect.top + rect.height / 2
+          });
+          element.dispatchEvent(event);
+        });
+      }
+
+      function waitForOptions(optionValue, timeout = 5000) {
+        return new Promise((resolve, reject) => {
+          const startTime = Date.now();
+          const intervalId = setInterval(() => {
+            const options = document.querySelectorAll('[role="option"]');
+            for (let option of options) {
+              if (option.textContent.trim().toLowerCase().includes(optionValue.toLowerCase())) {
+                clearInterval(intervalId);
+                resolve(option);
+                return;
+              }
+            }
+            if (Date.now() - startTime > timeout) {
+              clearInterval(intervalId);
+              reject(new Error(`Option "${optionValue}" not found within ${timeout}ms`));
+            }
+          }, 100);
+        });
+      }
+
+      function setReactSelectValue(selectElement, value) {
+        return new Promise((resolve, reject) => {
+          console.log("Setting React Select value:", value);
+
+          // Simulate opening the dropdown
+          simulateMouseEvents(selectElement, ['mouseover', 'mousedown', 'mouseup', 'click']);
+
+          // Wait for the dropdown to open and options to appear
+          waitForOptions(value, 5000)
+            .then((option) => {
+              console.log("Option found:", option);
+              // Simulate hovering over the option
+              simulateMouseEvents(option, ['mouseover']);
+
+              // Wait a bit to simulate user decision time
+              setTimeout(() => {
+                // Simulate clicking the option
+                simulateMouseEvents(option, ['mousedown', 'mouseup', 'click']);
+
+                // Wait for the dropdown to close
+                setTimeout(() => {
+                  // Verify if the value was set correctly
+                  const input = selectElement.querySelector('input');
+                  if (input && input.value.trim().toLowerCase() === value.trim().toLowerCase()) {
+                    console.log("Value set successfully");
+                    resolve();
+                  } else {
+                    console.error("Failed to set value");
+                    reject(new Error('Failed to set dropdown value'));
+                  }
+                }, 500);
+              }, 200);
+            })
+            .catch((error) => {
+              console.error("Error in setReactSelectValue:", error);
+              reject(error);
+            });
+        });
+      }
+
       async function performAction(action) {
         return new Promise((resolve, reject) => {
-          setTimeout(() => {
-            const element = findElementFuzzy(action.target);
+          setTimeout(async () => {
+            let element;
+
+            if (action.type === 'select' && action.dropdownSelector) {
+              element = findElementFuzzy(action.dropdownSelector);
+            } else {
+              element = findElementFuzzy(action.target);
+            }
+
             if (element) {
               element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              
               switch (action.type) {
                 case 'click':
                   highlightElement(element, 'red');
-                  element.click();
+                  simulateMouseEvents(element, ['mouseover', 'mousedown', 'mouseup', 'click']);
                   console.log(`Clicked element: ${action.target}`);
+                  break;
+                case 'select':
+                  console.log(`Selecting option: ${action.value}`);
+                  try {
+                    await setReactSelectValue(element, action.value);
+                    highlightElement(element, 'green');
+                  } catch (error) {
+                    console.error('Failed to set dropdown value:', error);
+                    reject(`Failed to set dropdown value: ${error.message}`);
+                    return;
+                  }
                   break;
                 case 'input':
                   console.log(`Setting input value to: ${action.value}`);
