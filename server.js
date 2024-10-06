@@ -117,9 +117,51 @@ app.post('/manual-login', async (req, res) => {
 
 app.post('/automate', async (req, res) => {
   try {
-    const { url, actions, speed } = req.body;
+    // Use the provided URL as the default if not specified in the request
+    const url = req.body.url || 'https://ops.trella.app/upsert/jobs/domestic/new';
+    
+    // Use the provided actions as the default if not specified in the request
+    const defaultActions = [
+      {
+        "target": "div#shipperKey > div > div > div:nth-of-type(2)",
+        "type": "click"
+      },
+      {
+        "target": "input#shipperKey",
+        "type": "input",
+        "value": "d"
+      },
+      {
+        "target": "input#shipperKey",
+        "type": "input",
+        "value": "de"
+      },
+      {
+        "target": "input#shipperKey",
+        "type": "input",
+        "value": "dem"
+      },
+      {
+        "target": "input#shipperKey",
+        "type": "input",
+        "value": "demo"
+      },
+      {
+        "target": "div#shipperKey-ent7930409194f58afd",
+        "type": "select",
+        "value": "Demo Shipper - 44"
+      },
+      {
+        "target": "input#shipperKey",
+        "type": "input",
+        "value": ""
+      }
+    ];
+    const actions = req.body.actions || defaultActions;
+    
+    const speed = req.body.speed || 1; // Default speed if not provided
 
-    if (!url || !isValidUrl(url)) {
+    if (!isValidUrl(url)) {
       return res.status(400).json({ error: 'Invalid URL' });
     }
 
@@ -162,15 +204,55 @@ app.post('/automate', async (req, res) => {
       const actions = JSON.parse(actionsString);
       const baseWaitTime = 1000 / speed;
 
+      let currentInputValues = {};
+
       function findElementFuzzy(selector) {
-        try {
-          return document.querySelector(selector);
-        } catch (e) {
-          console.log("Error with selector, trying alternatives");
-          return Array.from(document.querySelectorAll('*')).find(el => 
-            el.textContent.trim() === selector.trim()
-          );
+        console.log("Searching for element:", selector);
+        // Try exact match first
+        let element = document.querySelector(selector);
+        if (element) {
+          console.log("Exact match found:", element);
+          return element;
         }
+
+        // If not found, try fuzzy matching
+        const allElements = document.querySelectorAll('*');
+        let bestMatch = null;
+        let highestScore = 0;
+
+        allElements.forEach(el => {
+          const score = calculateSimilarity(getElementIdentifiers(el), selector);
+          if (score > highestScore) {
+            highestScore = score;
+            bestMatch = el;
+          }
+        });
+
+        if (bestMatch) {
+          console.log(`Fuzzy match found for "${selector}":`, bestMatch, "with score:", highestScore);
+        } else {
+          console.log(`No match found for "${selector}"`);
+        }
+
+        return bestMatch;
+      }
+
+      function getElementIdentifiers(element) {
+        return [
+          element.id,
+          element.name,
+          element.className,
+          element.tagName.toLowerCase(),
+          element.getAttribute('data-testid'),
+          ...Array.from(element.attributes).map(attr => `${attr.name}="${attr.value}"`)
+        ].filter(Boolean).join(' ');
+      }
+
+      function calculateSimilarity(str1, str2) {
+        const set1 = new Set(str1.toLowerCase().split(/\W+/));
+        const set2 = new Set(str2.toLowerCase().split(/\W+/));
+        const intersection = new Set([...set1].filter(x => set2.has(x)));
+        return intersection.size / Math.max(set1.size, set2.size);
       }
 
       function highlightElement(element, color) {
@@ -198,126 +280,95 @@ app.post('/automate', async (req, res) => {
       function waitForOptions(optionValue, timeout = 5000) {
         return new Promise((resolve, reject) => {
           const startTime = Date.now();
-          const intervalId = setInterval(() => {
-            const options = document.querySelectorAll('[role="option"]');
+          const checkOptions = () => {
+            const options = document.querySelectorAll('[role="option"], .css-1n99x9s-placeholder');
             for (let option of options) {
               if (option.textContent.trim().toLowerCase().includes(optionValue.toLowerCase())) {
-                clearInterval(intervalId);
                 resolve(option);
                 return;
               }
             }
             if (Date.now() - startTime > timeout) {
-              clearInterval(intervalId);
               reject(new Error(`Option "${optionValue}" not found within ${timeout}ms`));
+            } else {
+              setTimeout(checkOptions, 100);
             }
-          }, 100);
-        });
-      }
-
-      function setReactSelectValue(selectElement, value) {
-        return new Promise((resolve, reject) => {
-          console.log("Setting React Select value:", value);
-
-          // Simulate opening the dropdown
-          simulateMouseEvents(selectElement, ['mouseover', 'mousedown', 'mouseup', 'click']);
-
-          // Wait for the dropdown to open and options to appear
-          waitForOptions(value, 5000)
-            .then((option) => {
-              console.log("Option found:", option);
-              // Simulate hovering over the option
-              simulateMouseEvents(option, ['mouseover']);
-
-              // Wait a bit to simulate user decision time
-              setTimeout(() => {
-                // Simulate clicking the option
-                simulateMouseEvents(option, ['mousedown', 'mouseup', 'click']);
-
-                // Wait for the dropdown to close
-                setTimeout(() => {
-                  // Verify if the value was set correctly
-                  const input = selectElement.querySelector('input');
-                  if (input && input.value.trim().toLowerCase() === value.trim().toLowerCase()) {
-                    console.log("Value set successfully");
-                    resolve();
-                  } else {
-                    console.error("Failed to set value");
-                    reject(new Error('Failed to set dropdown value'));
-                  }
-                }, 500);
-              }, 200);
-            })
-            .catch((error) => {
-              console.error("Error in setReactSelectValue:", error);
-              reject(error);
-            });
+          };
+          checkOptions();
         });
       }
 
       async function performAction(action) {
-        return new Promise((resolve, reject) => {
-          setTimeout(async () => {
-            let element;
+        return new Promise(async (resolve, reject) => {
+          console.log("Attempting to perform action:", action);
+          let element = findElementFuzzy(action.target);
 
-            if (action.type === 'select' && action.dropdownSelector) {
-              element = findElementFuzzy(action.dropdownSelector);
-            } else {
-              element = findElementFuzzy(action.target);
-            }
-
-            if (element) {
-              element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-              
+          if (element) {
+            console.log("Element found:", element);
+            try {
               switch (action.type) {
                 case 'click':
-                  highlightElement(element, 'red');
-                  simulateMouseEvents(element, ['mouseover', 'mousedown', 'mouseup', 'click']);
-                  console.log(`Clicked element: ${action.target}`);
-                  break;
-                case 'select':
-                  console.log(`Selecting option: ${action.value}`);
-                  try {
-                    await setReactSelectValue(element, action.value);
-                    highlightElement(element, 'green');
-                  } catch (error) {
-                    console.error('Failed to set dropdown value:', error);
-                    reject(`Failed to set dropdown value: ${error.message}`);
-                    return;
-                  }
+                  console.log("Performing click on:", element);
+                  await clickElement(element);
                   break;
                 case 'input':
-                  console.log(`Setting input value to: ${action.value}`);
-                  highlightElement(element, 'blue');
-                  if (element.isContentEditable) {
-                    element.textContent = action.value;
-                    element.dispatchEvent(new Event('input', { bubbles: true }));
-                  } else if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') {
-                    element.value = action.value;
-                    element.dispatchEvent(new Event('input', { bubbles: true }));
-                    element.dispatchEvent(new Event('change', { bubbles: true }));
-                  } else {
-                    element.textContent = action.value;
-                  }
-                  // Simulate typing
-                  action.value.split('').forEach(char => {
-                    element.dispatchEvent(new KeyboardEvent('keydown', { key: char }));
-                    element.dispatchEvent(new KeyboardEvent('keypress', { key: char }));
-                    element.dispatchEvent(new KeyboardEvent('keyup', { key: char }));
-                  });
-                  console.log(`Input value set for element: ${action.target}`);
+                  console.log("Setting input value:", action.value);
+                  await setReactInputValue(element, action.value);
+                  break;
+                case 'select':
+                  console.log("Selecting option:", action.value);
+                  await selectReactOption(element, action.value);
                   break;
                 default:
-                  reject(`Unknown action type: ${action.type}`);
+                  console.error('Unknown action type:', action.type);
+                  reject(new Error(`Unknown action type: ${action.type}`));
                   return;
               }
+              highlightElement(element, 'green');
               resolve({ status: "success" });
-            } else {
-              console.log(`Element not found: ${action.target}`);
-              reject(`Element not found: ${action.target}`);
+            } catch (error) {
+              console.error(`Error performing ${action.type} action:`, error);
+              reject(error);
             }
-          }, baseWaitTime);
+          } else {
+            console.error('Element not found:', action.target);
+            reject(new Error(`Element not found: ${action.target}`));
+          }
         });
+      }
+
+      async function clickElement(element) {
+        simulateMouseEvents(element, ['mouseover', 'mousedown', 'mouseup', 'click']);
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+
+      async function setReactInputValue(element, value) {
+        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+        nativeInputValueSetter.call(element, value);
+
+        const ev2 = new Event('input', { bubbles: true });
+        element.dispatchEvent(ev2);
+
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+
+      async function selectReactOption(element, value) {
+        // Click to open the dropdown
+        await clickElement(element);
+
+        // Wait for the dropdown to open
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        // Find and click the option
+        const options = document.querySelectorAll('[role="option"]');
+        for (let option of options) {
+          if (option.textContent.trim().toLowerCase().includes(value.toLowerCase())) {
+            await clickElement(option);
+            return;
+          }
+        }
+
+        throw new Error(`Option "${value}" not found`);
       }
 
       window.automationResults = [];
