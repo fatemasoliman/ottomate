@@ -117,51 +117,11 @@ app.post('/manual-login', async (req, res) => {
 
 app.post('/automate', async (req, res) => {
   try {
-    // Use the provided URL as the default if not specified in the request
-    const url = req.body.url || 'https://ops.trella.app/upsert/jobs/domestic/new';
-    
-    // Use the provided actions as the default if not specified in the request
-    const defaultActions = [
-      {
-        "target": "div#shipperKey > div > div > div:nth-of-type(2)",
-        "type": "click"
-      },
-      {
-        "target": "input#shipperKey",
-        "type": "input",
-        "value": "d"
-      },
-      {
-        "target": "input#shipperKey",
-        "type": "input",
-        "value": "de"
-      },
-      {
-        "target": "input#shipperKey",
-        "type": "input",
-        "value": "dem"
-      },
-      {
-        "target": "input#shipperKey",
-        "type": "input",
-        "value": "demo"
-      },
-      {
-        "target": "div#shipperKey-ent7930409194f58afd",
-        "type": "select",
-        "value": "Demo Shipper - 44"
-      },
-      {
-        "target": "input#shipperKey",
-        "type": "input",
-        "value": ""
-      }
-    ];
-    const actions = req.body.actions || defaultActions;
-    
+    const url = req.body.url;
+    const actions = req.body.actions;
     const speed = req.body.speed || 1; // Default speed if not provided
 
-    if (!isValidUrl(url)) {
+    if (!url || !isValidUrl(url)) {
       return res.status(400).json({ error: 'Invalid URL' });
     }
 
@@ -208,14 +168,18 @@ app.post('/automate', async (req, res) => {
 
       function findElementFuzzy(selector) {
         console.log("Searching for element:", selector);
-        // Try exact match first
-        let element = document.querySelector(selector);
-        if (element) {
-          console.log("Exact match found:", element);
-          return element;
+        try {
+          // Try exact match first
+          let element = document.querySelector(selector);
+          if (element) {
+            console.log("Exact match found:", element);
+            return element;
+          }
+        } catch (error) {
+          console.log("Invalid selector, trying fuzzy match:", selector);
         }
 
-        // If not found, try fuzzy matching
+        // If not found or invalid selector, try fuzzy matching
         const allElements = document.querySelectorAll('*');
         let bestMatch = null;
         let highestScore = 0;
@@ -299,7 +263,7 @@ app.post('/automate', async (req, res) => {
       }
 
       async function performAction(action) {
-        return new Promise(async (resolve, reject) => {
+        return new Promise(async (resolve) => {
           console.log("Attempting to perform action:", action);
           let element = findElementFuzzy(action.target);
 
@@ -321,18 +285,21 @@ app.post('/automate', async (req, res) => {
                   break;
                 default:
                   console.error('Unknown action type:', action.type);
-                  reject(new Error(`Unknown action type: ${action.type}`));
+                  resolve({ status: "error", error: `Unknown action type: ${action.type}` });
                   return;
               }
               highlightElement(element, 'green');
+              console.log(`Action completed: ${action.type} on ${action.target}`);
+              await waitForActionCompletion(element, action);
               resolve({ status: "success" });
             } catch (error) {
               console.error(`Error performing ${action.type} action:`, error);
-              reject(error);
+              highlightElement(element, 'red');
+              resolve({ status: "error", error: error.message });
             }
           } else {
             console.error('Element not found:', action.target);
-            reject(new Error(`Element not found: ${action.target}`));
+            resolve({ status: "error", error: `Element not found: ${action.target}` });
           }
         });
       }
@@ -361,14 +328,64 @@ app.post('/automate', async (req, res) => {
 
         // Find and click the option
         const options = document.querySelectorAll('[role="option"]');
+        let optionFound = false;
         for (let option of options) {
           if (option.textContent.trim().toLowerCase().includes(value.toLowerCase())) {
             await clickElement(option);
-            return;
+            optionFound = true;
+            break;
           }
         }
 
-        throw new Error(`Option "${value}" not found`);
+        if (!optionFound) {
+          console.warn(`Option "${value}" not found in dropdown, but it might have been set correctly.`);
+        }
+
+        // Wait for the dropdown to close
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        // Check if the value was set correctly
+        const selectedValue = element.textContent.trim() || element.value.trim();
+        if (selectedValue.toLowerCase().includes(value.toLowerCase())) {
+          console.log(`Option "${value}" successfully selected.`);
+          return;
+        }
+
+        console.warn(`Unable to confirm if "${value}" was selected. Current value: "${selectedValue}"`);
+      }
+
+      async function waitForActionCompletion(element, action) {
+        // Wait for any animations or React state updates to complete
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        // For input actions, wait for the value to be set
+        if (action.type === 'input') {
+          let attempts = 0;
+          while (attempts < 10) {
+            if (element.value === action.value) {
+              console.log(`Input value confirmed: ${action.value}`);
+              return;
+            }
+            await new Promise(resolve => setTimeout(resolve, 100));
+            attempts++;
+          }
+          console.warn(`Input value not confirmed after ${attempts} attempts`);
+        }
+
+        // For select actions, wait for the dropdown to close
+        if (action.type === 'select') {
+          let attempts = 0;
+          while (attempts < 10) {
+            const dropdown = document.querySelector('[role="listbox"]');
+            if (!dropdown || window.getComputedStyle(dropdown).display === 'none') {
+              console.log('Dropdown closed after selection');
+              return;
+            }
+            await new Promise(resolve => setTimeout(resolve, 100));
+            attempts++;
+          }
+          console.warn(`Dropdown did not close after ${attempts} attempts`);
+        }
       }
 
       window.automationResults = [];
@@ -376,15 +393,18 @@ app.post('/automate', async (req, res) => {
       (async () => {
         for (const action of actions) {
           try {
-            await performAction(action);
-            window.automationResults.push({ status: "success", action });
-            window.postMessage({ type: 'AUTOMATION_STEP', data: { status: "success", action } }, '*');
+            const result = await performAction(action);
+            window.automationResults.push(result);
+            window.postMessage({ type: 'AUTOMATION_STEP', data: result }, '*');
+            console.log(`Action completed with status: ${result.status} for ${action.type} on ${action.target}`);
           } catch (error) {
-            window.automationResults.push({ status: "error", error, action });
-            window.postMessage({ type: 'AUTOMATION_STEP', data: { status: "error", error, action } }, '*');
+            console.error(`Unexpected error during action: ${action.type} on ${action.target}`, error);
           }
+          // Add a delay between actions
+          await new Promise(resolve => setTimeout(resolve, 1000));
         }
         window.postMessage({ type: 'AUTOMATION_COMPLETE' }, '*');
+        console.log('Automation sequence completed');
       })();
     }, JSON.stringify(actions), speed);
 
