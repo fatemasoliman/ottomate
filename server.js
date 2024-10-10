@@ -445,7 +445,7 @@ app.post('/automate', async (req, res) => {
   }
 });
 
-app.listen(port, () => {
+app.listen(port, '0.0.0.0', () => {
   console.log(`Server running on port ${port}`);
 });
 
@@ -461,4 +461,8 @@ app.get('/cookie-status', (req, res) => {
     cookiesExist: !!cookies && cookies.length > 0,
     cookieCount: cookies ? cookies.length : 0
   });
+});
+
+app.get('/', (req, res) => {
+  res.send('Server is running');
 });
