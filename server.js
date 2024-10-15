@@ -4,10 +4,12 @@ const cors = require('cors');
 const puppeteer = require('puppeteer');
 const fs = require('fs').promises;
 const WebSocket = require('ws');
+const path = require('path');
 require('dotenv').config();
 
 const app = express();
 const port = process.env.PORT || 3000;
+
 
 app.use(cors({
   origin: ['http://localhost:3001', 'http://localhost'],
@@ -15,12 +17,10 @@ app.use(cors({
 }));
 
 app.use(bodyParser.json());
+app.use(express.static('screenshots'));
 
 let browser = null;
 let page = null;
-let cookies = null;
-
-const COOKIES_FILE = 'cookies.json';
 
 const wss = new WebSocket.Server({ port: 3002 });
 
@@ -28,12 +28,24 @@ function log(message) {
   console.log(`[${new Date().toISOString()}] ${message}`);
 }
 
+async function takeScreenshot(name) {
+  if (page) {
+    const screenshotPath = path.join(__dirname, 'screenshots', `${name}_${Date.now()}.png`);
+    await page.screenshot({ path: screenshotPath, fullPage: true });
+    log(`Screenshot saved: ${screenshotPath}`);
+    return screenshotPath;
+  }
+}
+
 async function initBrowser() {
   if (!browser) {
     log('Launching new browser instance');
     browser = await puppeteer.launch({
       headless: 'new',
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox'
+      ],
       executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium-browser',
     });
     log('Browser instance created');
@@ -43,114 +55,84 @@ async function initBrowser() {
     page = await browser.newPage();
     await page.setViewport({ width: 1366, height: 768 });
     log('New page created');
+    await takeScreenshot('after_page_creation');
+
+    // Add more detailed logging
+    page.on('console', msg => log(`Browser console: ${msg.text()}`));
+    page.on('pageerror', error => log(`Browser page error: ${error.message}`));
+    page.on('request', request => log(`Browser request: ${request.method()} ${request.url()}`));
+    page.on('response', response => log(`Browser response: ${response.status()} ${response.url()}`));
   }
 }
-
-async function saveCookies() {
-  cookies = await page.cookies();
-  await fs.writeFile(COOKIES_FILE, JSON.stringify(cookies));
-}
-
-async function loadCookies() {
-  try {
-    const cookiesString = await fs.readFile(COOKIES_FILE, 'utf8');
-    cookies = JSON.parse(cookiesString);
-    return true;
-  } catch (error) {
-    return false;
-  }
-}
-
-async function getLoginInputs() {
-  return await page.evaluate(() => {
-    const inputs = Array.from(document.querySelectorAll('input')).map(input => ({
-      name: input.name,
-      type: input.type,
-      id: input.id,
-      placeholder: input.placeholder
-    }));
-    const submitButton = document.querySelector('button[type="submit"]');
-    return {
-      inputs,
-      submitButtonText: submitButton ? submitButton.innerText : null
-    };
-  });
-}
-
-async function submitLoginForm(formData) {
-  await page.evaluate((data) => {
-    Object.keys(data).forEach(key => {
-      const input = document.querySelector(`input[name="${key}"]`);
-      if (input) input.value = data[key];
-    });
-    const submitButton = document.querySelector('button[type="submit"]');
-    if (submitButton) submitButton.click();
-  }, formData);
-  await page.waitForNavigation({ waitUntil: 'networkidle0' });
-}
-
-app.post('/start-login', async (req, res) => {
-  const { url } = req.body;
-  try {
-    log(`Initializing browser for URL: ${url}`);
-    await initBrowser();
-    log(`Navigating to URL: ${url}`);
-    await page.goto(url, { waitUntil: 'networkidle0' });
-    log('Page loaded, getting login inputs');
-    const loginInputs = await getLoginInputs();
-    log(`Login inputs found: ${JSON.stringify(loginInputs)}`);
-    res.json({ loginInputs });
-  } catch (error) {
-    log(`Error in /start-login: ${error.message}`);
-    log(`Error stack: ${error.stack}`);
-    res.status(500).json({ error: error.message, stack: error.stack });
-  }
-});
-
-app.post('/submit-login', async (req, res) => {
-  const { formData, targetUrl } = req.body;
-  try {
-    await submitLoginForm(formData);
-    const currentUrl = page.url();
-    if (currentUrl === targetUrl) {
-      await saveCookies();
-      res.json({ success: true, message: 'Login successful' });
-    } else {
-      const loginInputs = await getLoginInputs();
-      res.json({ success: false, loginInputs });
-    }
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
 
 app.post('/automate', async (req, res) => {
-  const { url, actions } = req.body;
+  const { url, actions, cookies } = req.body;
   try {
     await initBrowser();
-    await loadCookies();
-    if (cookies) await page.setCookie(...cookies);
+    await takeScreenshot('before_setting_cookies');
+    
+    if (cookies && Array.isArray(cookies)) {
+      for (const cookie of cookies) {
+        try {
+          await page.setCookie(cookie);
+          log(`Cookie set successfully: ${cookie.name}`);
+        } catch (cookieError) {
+          log(`Error setting cookie ${cookie.name}: ${cookieError.message}`);
+        }
+      }
+    } else {
+      log('No valid cookies provided');
+    }
+    
+    await takeScreenshot('after_setting_cookies');
+    
+    log(`Navigating to URL: ${url}`);
     await page.goto(url, { waitUntil: 'networkidle0' });
+    log('Page loaded');
+    await takeScreenshot('after_page_load');
 
     for (const action of actions) {
+      log(`Performing action: ${JSON.stringify(action)}`);
       switch (action.type) {
         case 'click':
+          log(`Clicking on: ${action.target}`);
           await page.click(action.target);
+          log('Click performed');
           break;
         case 'input':
+          log(`Typing into: ${action.target}`);
           await page.type(action.target, action.value);
+          log('Input performed');
           break;
         case 'select':
+          log(`Selecting option in: ${action.target}`);
           await page.select(action.target, action.value);
+          log('Selection performed');
           break;
       }
-      await page.waitForTimeout(1000); // Wait for 1 second between actions
+      log('Waiting for 1 second');
+      await page.waitForTimeout(1000);
+      await takeScreenshot(`after_action_${action.type}`);
     }
 
-    const screenshot = await page.screenshot({ encoding: 'base64' });
-    res.json({ success: true, screenshot });
+    log('Taking final screenshot');
+    const finalScreenshotPath = await takeScreenshot('final');
+    log('Final screenshot taken');
+    
+    res.json({ 
+      success: true, 
+      screenshot: finalScreenshotPath,
+      message: 'Automation completed. Check server logs for screenshot paths.'
+    });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    log(`Error in /automate: ${error.message}`);
+    log(`Error stack: ${error.stack}`);
+    const errorScreenshotPath = await takeScreenshot('error');
+    res.status(500).json({ 
+      error: error.message, 
+      stack: error.stack,
+      errorScreenshot: errorScreenshotPath
+    });
   }
 });
 
