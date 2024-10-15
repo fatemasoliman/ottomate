@@ -4,14 +4,19 @@ services:
     build: .
     ports:
       - "3000:3000"
+      - "3002:3002"
     environment:
       - NODE_ENV=production
     volumes:
       - .:/usr/src/app
       - /usr/src/app/node_modules
+    cap_add:
+      - SYS_ADMIN
   client:
     build: ./client
     ports:
       - "80:80"
     depends_on:
       - server
+    environment:
+      - REACT_APP_API_URL=http://localhost:3000
