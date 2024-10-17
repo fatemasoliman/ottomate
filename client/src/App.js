@@ -10,22 +10,28 @@ function App() {
   const [cookie, setCookie] = useState('');
   const [error, setError] = useState('');
   const [result, setResult] = useState('');
+  const [screenshots, setScreenshots] = useState([]);
 
   const handleAutomate = async () => {
     try {
+      console.log('Starting automation...');
       const parsedActions = JSON.parse(actions);
       const cookiesArray = cookie.split(';').map(c => {
         const [name, ...value] = c.trim().split('=');
         return { name, value: value.join('='), domain: new URL(url).hostname };
       });
+      console.log('Sending request to:', `${API_URL}/automate`);
       const response = await axios.post(`${API_URL}/automate`, { url, actions: parsedActions, cookies: cookiesArray });
+      console.log('Response received:', response.data);
       setResult(JSON.stringify(response.data, null, 2));
+      setScreenshots(response.data.screenshots || []);
     } catch (error) {
-      if (error.response && error.response.status === 400) {
-        setError(`Invalid cookie format: ${error.response.data.error}`);
-      } else {
-        setError(`Error during automation: ${error.message}`);
+      console.error('Error during automation:', error);
+      if (error.response) {
+        console.error('Response data:', error.response.data);
+        console.error('Response status:', error.response.status);
       }
+      setError(`Error during automation: ${error.message}`);
     }
   };
 
@@ -74,6 +80,18 @@ function App() {
           <div className="result-section">
             <h2>Result:</h2>
             <pre>{result}</pre>
+          </div>
+        )}
+        
+        {screenshots.length > 0 && (
+          <div className="screenshots-section">
+            <h2>Screenshots:</h2>
+            {screenshots.map((screenshot, index) => (
+              <div key={index} className="screenshot-item">
+                <h3>{screenshot.name}</h3>
+                <img src={`data:image/png;base64,${screenshot.data}`} alt={screenshot.name} />
+              </div>
+            ))}
           </div>
         )}
       </main>

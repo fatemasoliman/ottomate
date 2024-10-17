@@ -166,3 +166,17 @@ pre {
 .log-entry.error {
   background-color: #ffebee;
 }
+
+.screenshots-section {
+  margin-top: 20px;
+}
+
+.screenshot-item {
+  margin-bottom: 20px;
+}
+
+.screenshot-item img {
+  max-width: 100%;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+}

@@ -1,22 +1,18 @@
 version: '3'
 services:
   server:
-    build: .
+    image: fatemasoliman427/ottomate-server:arm64
     ports:
       - "3000:3000"
       - "3002:3002"
     environment:
       - NODE_ENV=production
-    volumes:
-      - .:/usr/src/app
-      - /usr/src/app/node_modules
+      - CLIENT_ORIGIN=http://3.29.35.64
     cap_add:
       - SYS_ADMIN
   client:
-    build: ./client
+    image: fatemasoliman427/ottomate-client:latest
     ports:
       - "80:80"
     depends_on:
       - server
-    environment:
-      - REACT_APP_API_URL=http://localhost:3000

@@ -10,14 +10,20 @@ require('dotenv').config();
 const app = express();
 const port = process.env.PORT || 3000;
 
+const clientOrigin = process.env.CLIENT_ORIGIN || 'http://localhost';
 
 app.use(cors({
-  origin: ['http://localhost:3001', 'http://localhost'],
+  origin: ['http://3.29.35.64', 'http://localhost:3001'],
   credentials: true
 }));
 
 app.use(bodyParser.json());
 app.use(express.static('screenshots'));
+
+// Add this near the top of your file, after the other app.use() statements
+app.get('/', (req, res) => {
+  res.send('OttoMate server is running');
+});
 
 let browser = null;
 let page = null;
@@ -30,10 +36,9 @@ function log(message) {
 
 async function takeScreenshot(name) {
   if (page) {
-    const screenshotPath = path.join(__dirname, 'screenshots', `${name}_${Date.now()}.png`);
-    await page.screenshot({ path: screenshotPath, fullPage: true });
-    log(`Screenshot saved: ${screenshotPath}`);
-    return screenshotPath;
+    const screenshot = await page.screenshot({ encoding: 'base64', fullPage: true });
+    log(`Screenshot taken: ${name}`);
+    return { name, data: screenshot };
   }
 }
 
@@ -45,8 +50,8 @@ async function initBrowser() {
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox'
-      ],
-      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium-browser',
+      ]
+      // Remove the executablePath option
     });
     log('Browser instance created');
   }
@@ -69,7 +74,9 @@ app.post('/automate', async (req, res) => {
   const { url, actions, cookies } = req.body;
   try {
     await initBrowser();
-    await takeScreenshot('before_setting_cookies');
+    const screenshots = [];
+    
+    screenshots.push(await takeScreenshot('before_setting_cookies'));
     
     if (cookies && Array.isArray(cookies)) {
       for (const cookie of cookies) {
@@ -84,12 +91,12 @@ app.post('/automate', async (req, res) => {
       log('No valid cookies provided');
     }
     
-    await takeScreenshot('after_setting_cookies');
+    screenshots.push(await takeScreenshot('after_setting_cookies'));
     
     log(`Navigating to URL: ${url}`);
     await page.goto(url, { waitUntil: 'networkidle0' });
     log('Page loaded');
-    await takeScreenshot('after_page_load');
+    screenshots.push(await takeScreenshot('after_page_load'));
 
     for (const action of actions) {
       log(`Performing action: ${JSON.stringify(action)}`);
@@ -112,26 +119,26 @@ app.post('/automate', async (req, res) => {
       }
       log('Waiting for 1 second');
       await page.waitForTimeout(1000);
-      await takeScreenshot(`after_action_${action.type}`);
+      screenshots.push(await takeScreenshot(`after_action_${action.type}`));
     }
 
     log('Taking final screenshot');
-    const finalScreenshotPath = await takeScreenshot('final');
+    screenshots.push(await takeScreenshot('final'));
     log('Final screenshot taken');
     
     res.json({ 
       success: true, 
-      screenshot: finalScreenshotPath,
-      message: 'Automation completed. Check server logs for screenshot paths.'
+      screenshots,
+      message: 'Automation completed.'
     });
   } catch (error) {
     log(`Error in /automate: ${error.message}`);
     log(`Error stack: ${error.stack}`);
-    const errorScreenshotPath = await takeScreenshot('error');
+    const errorScreenshot = await takeScreenshot('error');
     res.status(500).json({ 
       error: error.message, 
       stack: error.stack,
-      errorScreenshot: errorScreenshotPath
+      errorScreenshot
     });
   }
 });
