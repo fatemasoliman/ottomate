@@ -1,20 +1,28 @@
-FROM node:20-alpine
+# Use a smaller base image
+FROM node:18-alpine
 
-# Install dependencies
-RUN apk update && \
-    apk add --no-cache chromium
-RUN apk add --no-cache curl
+# Install necessary dependencies for Puppeteer
+RUN apk add --no-cache chromium
 
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+# Set environment variables
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 
 WORKDIR /usr/src/app
 
+# Copy package.json and package-lock.json
 COPY package*.json ./
 
-RUN npm install
+# Install dependencies
+RUN npm ci --only=production
 
-COPY . .
+# Copy only necessary files
+COPY server.js .
+COPY screenshots ./screenshots
+
+# Create a non-root user
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+USER appuser
 
 EXPOSE 3000 3002
 
