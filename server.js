@@ -65,6 +65,10 @@ async function initBrowser() {
   }
 }
 
+app.get('/', (req, res) => {
+  res.send('Server is running');
+});
+
 app.post('/automate', async (req, res) => {
   const { url, actions, cookies } = req.body;
   try {

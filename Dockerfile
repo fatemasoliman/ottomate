@@ -3,6 +3,7 @@ FROM node:20-alpine
 # Install dependencies
 RUN apk update && \
     apk add --no-cache chromium
+RUN apk add --no-cache curl
 
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
